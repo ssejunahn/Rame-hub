@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON ORACLE ARCADE</title>
+<style>
+:root{--v:#0B0B14;--p:#12121f;--cy:#00F0FF;--mg:#FF2BD6;--am:#FFB000;--mi:#39FF88;--tx:#E8E6F0;--d:#9a97ad}
+*{box-sizing:border-box}
+body{margin:0;background:var(--v);color:var(--tx);font:16px/1.6 "Noto Sans KR","Malgun Gothic",sans-serif;background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 4px);min-height:100vh}
+.w{max-width:900px;margin:0 auto;padding:20px}
+h1{font:900 clamp(30px,7vw,56px)/1 "Courier New",monospace;color:var(--cy);margin:20px 0 6px;text-shadow:0 0 8px var(--cy),3px 0 rgba(255,43,214,.6)}
+.sub{color:var(--am);margin:0 0 18px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+button{font:inherit;background:transparent;color:var(--cy);border:1px solid var(--cy);padding:6px 14px;cursor:pointer}
+button:hover,button:focus-visible{background:var(--cy);color:var(--v);outline:none}
+button.on{background:var(--mi);border-color:var(--mi);color:var(--v)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.c{background:var(--p);border-left:5px solid var(--c);padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.c h3{margin:0;font-size:18px;color:var(--c)}.c p{margin:0;color:var(--d);font-size:14px;flex:1}
+.c.off{opacity:.45}.c.off button{border-color:#555;color:#777;pointer-events:none}
+#chaos{margin-top:16px;padding:14px;border:1px dashed var(--am);color:var(--am);min-height:60px}
+#game{display:none;text-align:center}
+#cv{max-width:100%;height:auto;border:2px solid var(--cy);box-shadow:0 0 22px rgba(0,240,255,.35);background:#000;touch-action:none}
+#say{font-family:"Courier New",monospace;color:var(--cy);min-height:28px;margin:10px 0}
+.pad{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.pad button{min-width:56px;padding:12px}
+.note{color:var(--d);font-size:13px;margin-top:24px}
+</style></head><body><div class="w">
+<div id="hub">
+<h1>NEON ORACLE<br>ARCADE</h1>
+<p class="sub">규칙은 그대로, 상대는 진화한다 — AI 튜닝 클래식 게임 허브</p>
+<div class="bar"><span>모드:</span>
+<button id="mE" class="on">Easy Start (AI 항상 표시)</button>
+<button id="mM">Master (힌트 토큰 3개)</button><button class="aiT"></button></div>
+<div class="grid" id="list"></div>
+<div id="chaos">Chaos Forge: 위의 카드를 눌러 오늘의 메타 룰을 받아 보세요.</div>
+<p class="note">모든 AI 보조는 브라우저 안에서 계산되며, 'AI 추천' 버튼으로 언제든 끌 수 있습니다. 체스는 킹을 잡으면 승리하는 간이 규칙입니다(캐슬링·앙파상 없음).</p>
+</div>
+<div id="game">
+<div class="bar"><button id="back">← 허브</button><button class="aiT"></button><button id="hint">힌트</button><span id="info"></span></div>
+<canvas id="cv"></canvas><div id="say"></div>
+<div class="pad" id="pad"></div>
+</div></div>
+<script>
+const $=s=>document.querySelector(s),cv=$('#cv'),ctx=cv.getContext('2d');
+let ai=true,hints=3,cur=null,tm=null;
+const say=t=>$('#say').textContent=t;
+const mods=[
+['chess','체스: Hyper-Intelligent Tutor','딥러닝 평가망으로 사고 과정을 가르치는 코치','#00F0FF',1],
+['tetris','테트리스: AI Dance Tetris','AI가 최적 회전·배치를 고스트로 제안','#FF2BD6',1],
+['snake','뱀: Survival Simulation','도달 가능 면적으로 안전한 길을 색칠','#39FF88',1],
+['mine','지뢰찾기: Sensor Minefield','칸별 지뢰 확률을 색으로 표시','#FFB000',1],
+['pong','퐁: Mirror Pong','내 습관을 학습하는 상대','#00F0FF',1],
+['break','벽돌깨기: Dream Breakout','단어로 스테이지 생성','#FF2BD6',1],
+['ttt','틱택토: Meta-Rule','5턴마다 규칙 변경','#39FF88',1],
+['2048','2048: Oracle','막힐 확률 예측','#FFB000',1],
+['sudoku','스도쿠: Story Sudoku','기법을 이야기로 설명','#00F0FF',1],
+['maze','미로 추격: Ghost Whisperer','동선을 읽는 유령','#FF2BD6',1],
+['chaos','랜덤 생성: Chaos Forge','클래식 규칙을 섞은 오늘의 메타 룰','#FFB000',2]];
+$('#list').innerHTML=mods.map(m=>`<div class="c ${m[4]?'':'off'}" style="--c:${m[3]}"><h3>${m[1]}</h3><p>${m[2]}</p><button data-g="${m[0]}">${m[4]?'PLAY':'준비 중'}</button></div>`).join('');
+$('#list').onclick=e=>{const g=e.target.dataset.g;if(!g)return;if(g=='chaos')return chaos();open_(g)};
+function chaos(){const a=['체스 말','뱀','테트리스 블록','지뢰','2048 타일'],b=['지뢰찾기','벽돌깨기','틱택토','퐁','스도쿠'],r=['5턴마다 보드가 한 칸 줄어듭니다','먹으면 크기가 반대로 변합니다','대각선 이동만 허용됩니다','상대 AI가 한 번 규칙을 무효화합니다','점수 대신 생존 시간으로 승부합니다'];
+const p=l=>l[Math.random()*l.length|0];$('#chaos').textContent=`오늘의 카오스: "${p(a)}로 하는 ${p(b)}" — ${p(r)}. (규칙 조합 데모)`}
+function setMode(e){ai=e;$('#mE').className=e?'on':'';$('#mM').className=e?'':'on';hints=3;upd()}
+$('#mE').onclick=()=>setMode(true);$('#mM').onclick=()=>setMode(false);
+function upd(){document.querySelectorAll('.aiT').forEach(b=>{b.textContent='AI 추천: '+(ai?'ON':'OFF');b.className='aiT'+(ai?' on':'')});$('#hint').style.display=ai?'none':'';$('#hint').textContent='힌트 ('+hints+')'}
+const on=()=>ai||Date.now()<(cur&&cur.until||0);
+$('#hint').onclick=()=>{if(hints>0&&cur){hints--;cur.until=Date.now()+2500;upd();cur.draw&&cur.draw();setTimeout(()=>cur&&cur.draw&&cur.draw(),2600)}};
+function open_(g){clearInterval(tm);cv.onclick=cv.oncontextmenu=cv.onpointermove=null;$('#hub').style.display='none';$('#game').style.display='block';upd();cur=G[g]();cur.until=0;
+$('#pad').innerHTML=g=='chess'||g=='ttt'?'':g=='sudoku'?[...'1234567890'].map(k=>`<button data-k="${k}">${k=='0'?'X':k}</button>`).join(''):g=='mine'?'<button data-k="flag">깃발 모드</button>':['ArrowLeft','ArrowUp','ArrowDown','ArrowRight'].map((k,i)=>`<button data-k="${k}">${'◀▲▼▶'[i]}</button>`).join('')+(g=='tetris'?'<button data-k=" ">DROP</button>':'')}
+$('#pad').onclick=e=>{const k=e.target.dataset.k;if(k&&cur)cur.key&&cur.key(k)};
+$('#back').onclick=()=>{clearInterval(tm);cur=null;$('#game').style.display='none';$('#hub').style.display='block'};
+addEventListener('keydown',e=>{if(cur&&cur.key){if(e.key.startsWith('Arrow')||e.key==' ')e.preventDefault();cur.key(e.key)}});
+const G={};
+G.snake=()=>{const N=20,S=20;cv.width=cv.height=N*S;let s=[[10,10],[9,10],[8,10]],d=[1,0],nd=d,f,over=0,sc=0;const o={};
+const fr=(x,y,b)=>x>=0&&y>=0&&x<N&&y<N&&!b.some(c=>c[0]==x&&c[1]==y);
+const area=(x,y,b)=>{const q=[[x,y]],z=new Set([x+','+y]);let n=0;while(q.length){const[a,c]=q.pop();n++;for(const[i,j]of[[1,0],[-1,0],[0,1],[0,-1]]){const X=a+i,Y=c+j,k=X+','+Y;if(!z.has(k)&&fr(X,Y,b)){z.add(k);q.push([X,Y])}}}return n};
+const place=()=>{do f=[Math.random()*N|0,Math.random()*N|0];while(!fr(f[0],f[1],s))};place();
+const opts=()=>[d,[d[1],-d[0]],[-d[1],d[0]]].map(v=>{const x=s[0][0]+v[0],y=s[0][1]+v[1],b=s.slice(0,-1);return{x,y,a:fr(x,y,b)?area(x,y,[[x,y],...b]):0}});
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,N*S,N*S);let m='';
+if(on()){const p=opts();p.forEach(q=>{if(q.x<0||q.y<0||q.x>=N||q.y>=N)return;const ok=q.a>=s.length;ctx.fillStyle=ok?'rgba(57,255,136,.35)':'rgba(255,43,214,.5)';ctx.fillRect(q.x*S,q.y*S,S,S)});const n=p.filter(q=>q.a>=s.length).length;m=n?`안전한 길 ${n}개`:'⚠ 갇힐 위험! 탈출 경로 없음'}
+ctx.fillStyle='#FFB000';ctx.fillRect(f[0]*S+3,f[1]*S+3,S-6,S-6);s.forEach((c,i)=>{ctx.fillStyle=i?'#00F0FF':'#fff';ctx.fillRect(c[0]*S+1,c[1]*S+1,S-2,S-2)});
+if(m)say(m+` · 점수 ${sc}`);else say('점수 '+sc);if(over)say('GAME OVER · 점수 '+sc+' (허브로 돌아가 다시 시작)')};
+o.key=k=>{const m={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]}[k];if(m&&(m[0]+d[0]||m[1]+d[1]))nd=m};
+clearInterval(tm);tm=setInterval(()=>{if(over)return;d=nd;const h=[s[0][0]+d[0],s[0][1]+d[1]];if(!fr(h[0],h[1],s.slice(0,-1))){over=1;o.draw();return}s.unshift(h);if(h[0]==f[0]&&h[1]==f[1]){sc++;place()}else s.pop();o.draw()},120);o.draw();return o};
+G.mine=()=>{const W=9,H=9,M=10,S=40;cv.width=W*S;cv.height=H*S;let g=[],first=1,over=0,fm=0;const o={};
+for(let i=0;i<W*H;i++)g.push({m:0,r:0,f:0});
+const nb=i=>{const x=i%W,y=i/W|0,r=[];for(let a=-1;a<2;a++)for(let b=-1;b<2;b++){const X=x+a,Y=y+b;if((a||b)&&X>=0&&Y>=0&&X<W&&Y<H)r.push(Y*W+X)}return r};
+const cnt=i=>nb(i).filter(j=>g[j].m).length;
+const rev=i=>{if(g[i].r||g[i].f)return;g[i].r=1;if(!g[i].m&&!cnt(i))nb(i).forEach(rev)};
+function probs(){const fl=g.filter(c=>c.f).length,un=g.filter(c=>!c.r&&!c.f).length,dn=un?(M-fl)/un:0,p={};
+g.forEach((c,i)=>{if(!c.r||!cnt(i))return;const u=nb(i).filter(j=>!g[j].r&&!g[j].f),rm=cnt(i)-nb(i).filter(j=>g[j].f).length;if(!u.length)return;const q=Math.max(0,Math.min(1,rm/u.length));u.forEach(j=>{p[j]=(p[j]===0||q===0)?0:Math.max(p[j]||0,q)})});
+g.forEach((c,i)=>{if(!c.r&&!c.f&&p[i]===undefined)p[i]=dn});return p}
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,W*S,H*S);const p=probs();ctx.font='bold 18px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+g.forEach((c,i)=>{const x=i%W*S,y=(i/W|0)*S;ctx.strokeStyle='#26263a';ctx.strokeRect(x,y,S,S);
+if(c.r){ctx.fillStyle='#12121f';ctx.fillRect(x+1,y+1,S-2,S-2);if(c.m){ctx.fillStyle='#FF2BD6';ctx.fillText('✹',x+S/2,y+S/2)}else if(cnt(i)){ctx.fillStyle=['','#00F0FF','#39FF88','#FFB000','#FF2BD6'][Math.min(4,cnt(i))];ctx.fillText(cnt(i),x+S/2,y+S/2)}}
+else{ctx.fillStyle='#1d1d33';ctx.fillRect(x+1,y+1,S-2,S-2);if(c.f){ctx.fillStyle='#FFB000';ctx.fillText('⚑',x+S/2,y+S/2)}else if(on()&&!first&&!over){const q=p[i];ctx.fillStyle=q===0?'rgba(57,255,136,.55)':q>=1?'rgba(255,43,214,.6)':`rgba(255,176,0,${.15+q*.5})`;ctx.fillRect(x+1,y+1,S-2,S-2);ctx.fillStyle='#fff';ctx.font='11px monospace';ctx.fillText(Math.round(q*100)+'%',x+S/2,y+S/2);ctx.font='bold 18px monospace'}}});
+const left=g.filter(c=>!c.r&&!c.m).length;if(!over&&!left){over=2}say(over==1?'💥 BOOM! (허브에서 다시 시작)':over==2?'CLEAR! 모든 안전 칸을 열었습니다':first?'아무 칸이나 눌러 시작 · 첫 클릭은 안전':on()?'초록=확실히 안전 · 마젠타=확실한 지뢰 · 호박색=확률':'Master: 힌트를 쓰면 확률이 2.5초간 보입니다')};
+function act(i,flag){if(over)return;if(flag){if(!g[i].r)g[i].f^=1}else{if(first){first=0;let n=0;while(n<M){const j=Math.random()*W*H|0;if(!g[j].m&&j!=i){g[j].m=1;n++}}}if(g[i].f)return;rev(i);if(g[i].m)over=1}o.draw()}
+cv.onclick=e=>{if(!cur)return;const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W|0,y=(e.clientY-r.top)/r.height*H|0;act(y*W+x,fm)};
+cv.oncontextmenu=e=>{e.preventDefault();const r=cv.getBoundingClientRect();act(((e.clientY-r.top)/r.height*H|0)*W+((e.clientX-r.left)/r.width*W|0),1)};
+o.key=k=>{if(k=='flag'){fm^=1;say(fm?'깃발 모드 ON':'깃발 모드 OFF')}};clearInterval(tm);o.draw();return o};
+G.tetris=()=>{const W=10,H=20,S=24;cv.width=W*S;cv.height=H*S;const T=[[[1,1,1,1]],[[1,1],[1,1]],[[0,1,0],[1,1,1]],[[0,1,1],[1,1,0]],[[1,1,0],[0,1,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]]],C=['#00F0FF','#FFB000','#FF2BD6','#39FF88','#ff5555','#6a7bff','#ff9a3c'];
+let b=Array.from({length:H},()=>Array(W).fill(0)),p,sc=0,over=0,bag=[];const o={};
+const rot=m=>m[0].map((_,i)=>m.map(r=>r[i]).reverse());
+const hit=(B,m,x,y)=>m.some((r,j)=>r.some((v,i)=>v&&(x+i<0||x+i>=W||y+j>=H||(y+j>=0&&B[y+j][x+i]))));
+const put=(B,m,x,y,c)=>m.forEach((r,j)=>r.forEach((v,i)=>{if(v&&y+j>=0)B[y+j][x+i]=c}));
+const next=()=>{if(!bag.length)bag=[0,1,2,3,4,5,6].sort(()=>Math.random()-.5);const k=bag.pop();p={m:T[k],x:3,y:0,c:k+1};if(hit(b,p.m,p.x,p.y))over=1;p.ai=best()};
+function ev(B){let hs=0,ho=0,bp=0,pr=0,ln=0;const h=[];for(let x=0;x<W;x++){let y=0;while(y<H&&!B[y][x])y++;h.push(H-y);hs+=H-y;for(let k=y+1;k<H;k++)if(!B[k][x])ho++}for(let x=1;x<W;x++)bp+=Math.abs(h[x]-h[x-1]);ln=B.filter(r=>r.every(v=>v)).length;return -.51*hs+.76*ln*3-.36*ho*3-.18*bp}
+function best(){let r=null,m=p.m;for(let k=0;k<4;k++){for(let x=-2;x<W;x++){if(hit(b,m,x,0))continue;let y=0;while(!hit(b,m,x,y+1))y++;const B=b.map(r=>[...r]);put(B,m,x,y,1);const s=ev(B);if(!r||s>r.s)r={s,m,x,y}}m=rot(m)}return r}
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,W*S,H*S);b.forEach((r,y)=>r.forEach((v,x)=>{if(v){ctx.fillStyle=C[v-1]||'#555';ctx.fillRect(x*S+1,y*S+1,S-2,S-2)}}));
+if(p&&!over){if(on()&&p.ai){ctx.strokeStyle='#00F0FF';ctx.lineWidth=2;p.ai.m.forEach((r,j)=>r.forEach((v,i)=>{if(v)ctx.strokeRect((p.ai.x+i)*S+2,(p.ai.y+j)*S+2,S-4,S-4)}))}
+ctx.fillStyle=C[p.c-1];p.m.forEach((r,j)=>r.forEach((v,i)=>{if(v)ctx.fillRect((p.x+i)*S+1,(p.y+j)*S+1,S-2,S-2)}))}
+say(over?'GAME OVER · 줄 '+sc:on()?`줄 ${sc} · 시안 테두리 = AI가 추천하는 위치`:'줄 '+sc+' · Master: 힌트로 추천 위치 확인')};
+const lock=()=>{put(b,p.m,p.x,p.y,p.c);b=b.filter(r=>!r.every(v=>v));while(b.length<H){b.unshift(Array(W).fill(0));sc++}sc=sc;next()};
+o.key=k=>{if(over)return;if(k=='ArrowLeft'&&!hit(b,p.m,p.x-1,p.y))p.x--;if(k=='ArrowRight'&&!hit(b,p.m,p.x+1,p.y))p.x++;if(k=='ArrowDown'&&!hit(b,p.m,p.x,p.y+1))p.y++;if(k=='ArrowUp'){const m=rot(p.m);if(!hit(b,m,p.x,p.y))p.m=m}if(k==' '){while(!hit(b,p.m,p.x,p.y+1))p.y++;lock()}o.draw()};
+next();clearInterval(tm);tm=setInterval(()=>{if(over)return;if(!hit(b,p.m,p.x,p.y+1))p.y++;else lock();o.draw()},550);o.draw();return o};
+
+G.chess=()=>{const S=50,o={};cv.width=cv.height=400;let B=('rnbqkbnrpppppppp'+'.'.repeat(32)+'PPPPPPPPRNBQKBNR').split(''),sel=-1,over=0,hs=null,msg='';
+const V={p:1,n:3,b:3,r:5,q:9,k:100},isW=c=>c!='.'&&c==c.toUpperCase();
+const gen=(B,w)=>{const m=[];B.forEach((c,i)=>{if(c=='.'||isW(c)!=w)return;const x=i%8,y=i>>3,t=c.toLowerCase();
+const add=(X,Y,k)=>{if(X<0||Y<0||X>7||Y>7)return 0;const q=B[Y*8+X];if(q=='.'){if(k!='c')m.push([i,Y*8+X]);return 1}if(k!='m'&&isW(q)!=w)m.push([i,Y*8+X]);return 0};
+if(t=='p'){const d=w?-1:1;if(add(x,y+d,'m')&&(w?y==6:y==1))add(x,y+2*d,'m');add(x-1,y+d,'c');add(x+1,y+d,'c')}
+else if(t=='n')[[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]].forEach(d=>add(x+d[0],y+d[1]));
+else if(t=='k')[-1,0,1].forEach(a=>[-1,0,1].forEach(b=>(a||b)&&add(x+a,y+b)));
+else{const ds=[];if(t!='b')ds.push([1,0],[-1,0],[0,1],[0,-1]);if(t!='r')ds.push([1,1],[1,-1],[-1,1],[-1,-1]);ds.forEach(d=>{let X=x+d[0],Y=y+d[1];while(add(X,Y)){X+=d[0];Y+=d[1]}})}});return m};
+const mk=(B,m)=>{const n=[...B];n[m[1]]=n[m[0]];n[m[0]]='.';if(n[m[1]]=='P'&&m[1]<8)n[m[1]]='Q';if(n[m[1]]=='p'&&m[1]>55)n[m[1]]='q';return n};
+const ev=B=>B.reduce((s,c)=>c=='.'?s:s+(isW(c)?1:-1)*V[c.toLowerCase()],0);
+const se=(B,w,d,a,b)=>{if(d==0)return ev(B);const ms=gen(B,w);if(!ms.length)return 0;let r=w?-1e9:1e9;for(const m of ms){const s=se(mk(B,m),!w,d-1,a,b);if(w){r=Math.max(r,s);a=Math.max(a,r)}else{r=Math.min(r,s);b=Math.min(b,r)}if(b<=a)break}return r};
+const best=(B,w,d)=>{let r=null;gen(B,w).sort(()=>Math.random()-.5).forEach(m=>{const s=se(mk(B,m),!w,d-1,-1e9,1e9);if(!r||(w?s>r.s:s<r.s))r={m,s}});return r};
+const chk=()=>{if(!B.includes('k')){over=1;msg='승리! 검은 킹을 잡았습니다 🎉'}else if(!B.includes('K')){over=1;msg='패배: 킹을 잃었습니다'}};
+const think=()=>{hs=over?null:best(B,true,3)};
+o.draw=()=>{ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='36px serif';
+for(let i=0;i<64;i++){const x=i%8*S,y=(i>>3)*S;ctx.fillStyle=((i%8)+(i>>3))%2?'#1d1d33':'#2b2b4a';ctx.fillRect(x,y,S,S);if(i==sel){ctx.fillStyle='rgba(0,240,255,.4)';ctx.fillRect(x,y,S,S)}const c=B[i];if(c!='.'){ctx.fillStyle=isW(c)?'#fff':'#FF2BD6';ctx.fillText('♚♛♜♝♞♟'['kqrbnp'.indexOf(c.toLowerCase())],x+S/2,y+S/2+2)}}
+if(sel>=0)gen(B,true).filter(m=>m[0]==sel).forEach(m=>{ctx.fillStyle='rgba(57,255,136,.7)';ctx.fillRect(m[1]%8*S+18,(m[1]>>3)*S+18,14,14)});
+if(on()&&hs&&!over){ctx.strokeStyle='#FFB000';ctx.lineWidth=3;hs.m.forEach(i=>ctx.strokeRect(i%8*S+2,(i>>3)*S+2,S-4,S-4))}
+say((msg||'흰색 차례 — 말을 눌러 이동')+(on()&&hs&&!over?` · 코치 추천(호박색), 평가 ${hs.s>0?'+':''}${hs.s}`:''))};
+cv.onclick=e=>{if(over)return;const r=cv.getBoundingClientRect(),i=((e.clientY-r.top)/r.height*8|0)*8+((e.clientX-r.left)/r.width*8|0);
+if(sel>=0){const mv=gen(B,true).find(m=>m[0]==sel&&m[1]==i);if(mv){const nb=mk(B,mv),d=hs.s-se(nb,false,2,-1e9,1e9);msg=d>=2?`⚠ 최선수보다 ${d}점 손해`:'좋은 수!';B=nb;sel=-1;chk();hs=null;o.draw();if(!over)setTimeout(()=>{const a=best(B,false,3);if(a)B=mk(B,a.m);chk();think();o.draw()},60);return}}
+sel=B[i]!='.'&&isW(B[i])?i:-1;o.draw()};
+think();o.draw();return o};
+G.pong=()=>{cv.width=400;cv.height=300;let bx=200,by=150,vx=-3,vy=2,py=120,ay=120,ps=0,as=0;const o={},cl=v=>Math.max(0,Math.min(240,v));
+const rs=d=>{bx=200;by=150;vx=3*d;vy=(Math.random()-.5)*4};
+o.key=k=>{if(k=='ArrowUp')py=cl(py-25);if(k=='ArrowDown')py=cl(py+25)};
+cv.onpointermove=e=>{const r=cv.getBoundingClientRect();py=cl((e.clientY-r.top)/r.height*300-30)};
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,400,300);
+if(on()&&vx<0){let x=bx,y=by,dx=vx,dy=vy;ctx.strokeStyle='rgba(0,240,255,.5)';ctx.beginPath();ctx.moveTo(x,y);for(let i=0;i<400&&x>16;i++){x+=dx;y+=dy;if(y<0||y>300)dy=-dy;if(i%3==0)ctx.lineTo(x,y)}ctx.stroke();ctx.fillStyle='#00F0FF';ctx.fillRect(10,y-3,6,6)}
+ctx.fillStyle='#39FF88';ctx.fillRect(10,py,6,60);ctx.fillStyle='#FF2BD6';ctx.fillRect(384,ay,6,60);ctx.fillStyle='#FFB000';ctx.fillRect(bx-5,by-5,10,10);
+say(ps>6?'승리! 🎉':as>6?'패배...':`당신 ${ps} : ${as} AI · AI 속도 ${(1.5+ps*.35).toFixed(1)} (앞설수록 빨라짐) · 마우스/↑↓`)};
+tm=setInterval(()=>{if(ps<7&&as<7){bx+=vx;by+=vy;if(by<5||by>295)vy=-vy;const sp=1.5+ps*.35;ay=cl(ay+Math.max(-sp,Math.min(sp,by-ay-30)));
+if(vx<0&&bx<=16&&bx>5&&by>py-5&&by<py+65){vx=-vx*1.06;vy+=(by-py-30)/12}
+if(vx>0&&bx>=384&&bx<395&&by>ay-5&&by<ay+65){vx=Math.max(-8,-vx*1.06);vy+=(by-ay-30)/12}
+if(bx<0){as++;rs(1)}if(bx>400){ps++;rs(-1)}}o.draw()},16);o.draw();return o};
+G['break']=()=>{cv.width=400;cv.height=300;let px=170,bx=200,by=250,vx=2.5,vy=-3,lv=3,sc=0;const o={},br=[],cl=v=>Math.max(0,Math.min(340,v));
+for(let j=0;j<4;j++)for(let i=0;i<8;i++)if(Math.random()<.85)br.push({x:i*48+9,y:30+j*18,a:1});
+cv.onpointermove=e=>{const r=cv.getBoundingClientRect();px=cl((e.clientX-r.left)/r.width*400-30)};
+o.key=k=>{if(k=='ArrowLeft')px=cl(px-30);if(k=='ArrowRight')px=cl(px+30)};
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,400,300);br.forEach(b=>{if(b.a){ctx.fillStyle=['#FF2BD6','#FFB000','#39FF88','#00F0FF'][(b.y-30)/18];ctx.fillRect(b.x,b.y,44,14)}});
+if(on()&&vy>0){let x=bx,y=by,dx=vx;while(y<280){x+=dx;y+=vy;if(x<0||x>400)dx=-dx}ctx.strokeStyle='rgba(0,240,255,.4)';ctx.beginPath();ctx.moveTo(bx,by);ctx.lineTo(x,y);ctx.stroke();ctx.fillStyle='#00F0FF';ctx.fillRect(x-3,276,6,6)}
+ctx.fillStyle='#39FF88';ctx.fillRect(px,284,60,8);ctx.fillStyle='#FFB000';ctx.beginPath();ctx.arc(bx,by,5,0,7);ctx.fill();
+say(!lv?'GAME OVER':br.some(b=>b.a)?`점수 ${sc} · 목숨 ${'♥'.repeat(lv)} · 마우스/◀▶`:'CLEAR! 🎉')};
+tm=setInterval(()=>{if(lv>0&&br.some(b=>b.a)){bx+=vx;by+=vy;if(bx<5||bx>395)vx=-vx;if(by<5)vy=-vy;
+if(vy>0&&by>=280&&by<290&&bx>px&&bx<px+60){vy=-vy;vx=(bx-px-30)/10}
+if(by>300){lv--;bx=200;by=250;vx=2.5;vy=-3}
+const h=br.find(b=>b.a&&bx>b.x&&bx<b.x+44&&by>b.y&&by<b.y+14);if(h){h.a=0;vy=-vy;sc++}}o.draw()},16);o.draw();return o};
+G.ttt=()=>{cv.width=cv.height=300;const o={},R=['일반: 3목이면 승리','역 규칙: 3목을 만들면 패배!','중앙 칸 사용 금지','대각선 3목은 무효'],L=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+let b=Array(9).fill(''),rule=0,n=0,over=0,msg='',hs;
+const ok=i=>!b[i]&&!(rule==2&&i==4),jd=(B,s)=>L.some((q,k)=>(rule!=3||k<6)&&q.every(i=>B[i]==s))?(rule==1?'lose':'win'):0;
+const pick=s=>{const e=s=='X'?'O':'X',lg=[...Array(9).keys()].filter(ok),t=(i,y)=>{const B=[...b];B[i]=y;return jd(B,y)};let w=lg.find(i=>t(i,s)=='win');if(w!==undefined)return w;w=lg.find(i=>t(i,e)=='win');if(w!==undefined)return w;const sf=lg.filter(i=>t(i,s)!='lose'),c=sf.length?sf:lg;return c[Math.random()*c.length|0]};
+const fin=s=>{const j=jd(b,s);if(j){over=1;msg=(j=='win')==(s=='X')?'당신의 승리! 🎉':'AI의 승리...';return 1}if(!b.some((v,i)=>ok(i))){over=1;msg='무승부';return 1}};
+const step=()=>{n++;if(n%5==0){let r;do r=Math.random()*4|0;while(r==rule);rule=r;msg='📢 새 규칙 선포!'}};
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,300,300);ctx.strokeStyle='#00F0FF';ctx.lineWidth=3;for(let i=1;i<3;i++){ctx.beginPath();ctx.moveTo(i*100,10);ctx.lineTo(i*100,290);ctx.moveTo(10,i*100);ctx.lineTo(290,i*100);ctx.stroke()}
+ctx.font='bold 60px monospace';ctx.textAlign='center';ctx.textBaseline='middle';b.forEach((v,i)=>{const x=i%3*100+50,y=(i/3|0)*100+50;if(rule==2&&i==4){ctx.fillStyle='#26263a';ctx.fillRect(x-45,y-45,90,90)}if(v){ctx.fillStyle=v=='X'?'#39FF88':'#FF2BD6';ctx.fillText(v,x,y+4)}});
+if(on()&&!over&&hs!==undefined){ctx.strokeStyle='#FFB000';ctx.strokeRect(hs%3*100+8,(hs/3|0)*100+8,84,84)}
+say(`[규칙] ${R[rule]} · ${msg}${over?' (클릭하면 재시작)':''}`)};
+cv.onclick=e=>{if(over){b=Array(9).fill('');over=0;n=0;rule=0;msg='';hs=pick('X');return o.draw()}const r=cv.getBoundingClientRect(),i=((e.clientY-r.top)/r.height*3|0)*3+((e.clientX-r.left)/r.width*3|0);if(!ok(i))return;msg='';b[i]='X';if(!fin('X')){step();const a=pick('O');if(a!==undefined){b[a]='O';if(!fin('O'))step()}}hs=over?undefined:pick('X');o.draw()};
+hs=pick('X');o.draw();return o};
+G['2048']=()=>{cv.width=cv.height=320;let b=Array(16).fill(0),sc=0,over=0;const o={},col=['#1d1d33','#00F0FF','#39FF88','#FFB000','#FF2BD6','#6a7bff','#ff9a3c','#ff5555','#9b6bff','#2fd5a3','#ffd93d','#fff'],AR='←↑→↓';
+const sp=()=>{const e=b.map((v,i)=>v?-1:i).filter(i=>i>=0);if(e.length)b[e[Math.random()*e.length|0]]=Math.random()<.9?2:4};
+const ix=(d,k,j)=>[k*4+j,j*4+k,k*4+3-j,(3-j)*4+k][d];
+const mv=(B,d)=>{const n=[...B];let s=0;for(let k=0;k<4;k++){const a=[0,1,2,3].map(j=>B[ix(d,k,j)]).filter(v=>v);for(let i=0;i<a.length-1;i++)if(a[i]==a[i+1]){a[i]*=2;s+=a[i];a.splice(i+1,1)}while(a.length<4)a.push(0);a.forEach((v,j)=>n[ix(d,k,j)]=v)}return{n,s,ch:n.some((v,i)=>v!=B[i])}};
+const rec=()=>{let r=null;[0,1,2,3].forEach(d=>{const m=mv(b,d);if(!m.ch)return;const mx=Math.max(...m.n),e=m.n.filter(v=>!v).length,s=m.s+e*8+([0,3,12,15].some(i=>m.n[i]==mx)?15:0);if(!r||s>r.s)r={d,s,e}});return r};
+o.draw=()=>{ctx.fillStyle='#12121f';ctx.fillRect(0,0,320,320);ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold 26px monospace';b.forEach((v,i)=>{const x=i%4*80,y=(i>>2)*80;ctx.fillStyle=col[v?Math.min(11,Math.log2(v)):0];ctx.fillRect(x+4,y+4,72,72);if(v){ctx.fillStyle='#0B0B14';ctx.fillText(v,x+40,y+42)}});
+const r=rec();say(over?'GAME OVER · 점수 '+sc:`점수 ${sc} · 방향키/버튼`+(on()&&r?` · 추천 ${AR[r.d]} (이동 후 빈칸 ${r.e}개)`:''))};
+o.key=k=>{const d={ArrowLeft:0,ArrowUp:1,ArrowRight:2,ArrowDown:3}[k];if(d===undefined||over)return;const m=mv(b,d);if(!m.ch)return;b=m.n;sc+=m.s;sp();if([0,1,2,3].every(q=>!mv(b,q).ch))over=1;o.draw()};
+sp();sp();o.draw();return o};
+G.sudoku=()=>{cv.width=cv.height=360;const S=40,o={},sh=()=>[0,1,2].sort(()=>Math.random()-.5),ro=[0,1,2].flatMap(k=>sh().map(i=>k*3+i)),co=[0,1,2].flatMap(k=>sh().map(i=>k*3+i)),pm=[1,2,3,4,5,6,7,8,9].sort(()=>Math.random()-.5);
+const sol=ro.map(r=>co.map(c=>pm[(r*3+(r/3|0)+c)%9])),g=sol.map(r=>[...r]),gv=g.map(r=>r.map(()=>1));
+[...Array(81).keys()].sort(()=>Math.random()-.5).slice(0,42).forEach(i=>{g[i/9|0][i%9]=0;gv[i/9|0][i%9]=0});let sr=4,sc=4;
+const cand=(r,c)=>{const u=new Set();for(let i=0;i<9;i++){u.add(g[r][i]);u.add(g[i][c])}const a=r-r%3,b=c-c%3;for(let i=0;i<3;i++)for(let j=0;j<3;j++)u.add(g[a+i][b+j]);return[1,2,3,4,5,6,7,8,9].filter(v=>!u.has(v))};
+o.draw=()=>{ctx.fillStyle='#0B0B14';ctx.fillRect(0,0,360,360);ctx.font='bold 22px monospace';ctx.textAlign='center';ctx.textBaseline='middle';let one=null;
+for(let r=0;r<9;r++)for(let c=0;c<9;c++){const x=c*S,y=r*S,v=g[r][c];if(r==sr&&c==sc){ctx.fillStyle='rgba(0,240,255,.3)';ctx.fillRect(x,y,S,S)}
+if(!v&&cand(r,c).length==1){if(!one)one=[r,c];if(on()){ctx.fillStyle='rgba(57,255,136,.3)';ctx.fillRect(x,y,S,S)}}
+if(v){ctx.fillStyle=v!=sol[r][c]?'#FF2BD6':gv[r][c]?'#E8E6F0':'#00F0FF';ctx.fillText(v,x+S/2,y+S/2+2)}}
+for(let i=0;i<=9;i++){ctx.strokeStyle=i%3?'#26263a':'#00F0FF';ctx.lineWidth=i%3?1:2;ctx.beginPath();ctx.moveTo(i*S,0);ctx.lineTo(i*S,360);ctx.moveTo(0,i*S);ctx.lineTo(360,i*S);ctx.stroke()}
+const win=g.every((r,i)=>r.every((v,j)=>v==sol[i][j]));
+say(win?'CLEAR! 🎉':on()?(one?`이야기 힌트: (${one[0]+1}행 ${one[1]+1}열) — 같은 행·열·박스의 숫자를 소거하면 후보가 하나뿐!`:'단순 소거로 풀리는 칸이 없어요. 후보가 적은 칸부터 찾아보세요.')+(g[sr][sc]?'':` · 선택 칸 후보: ${cand(sr,sc).join(',')}`):'칸을 누르고 숫자 입력 (분홍=오답)')};
+cv.onclick=e=>{const r=cv.getBoundingClientRect();sc=(e.clientX-r.left)/r.width*9|0;sr=(e.clientY-r.top)/r.height*9|0;o.draw()};
+o.key=k=>{const a={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}[k];if(a){sr=Math.max(0,Math.min(8,sr+a[0]));sc=Math.max(0,Math.min(8,sc+a[1]))}else if(!gv[sr][sc]){if(/^[0-9]$/.test(k))g[sr][sc]=+k;if(k=='Backspace')g[sr][sc]=0}o.draw()};
+o.draw();return o};
+G.maze=()=>{const N=14,S=26,o={};cv.width=cv.height=N*S;const w=Array(N*N).fill(15),vis=Array(N*N).fill(0),D=[[0,-1,1,4],[1,0,2,8],[0,1,4,1],[-1,0,8,2]],st=[0];vis[0]=1;
+while(st.length){const c=st[st.length-1],x=c%N,y=c/N|0,op=D.filter(d=>{const X=x+d[0],Y=y+d[1];return X>=0&&Y>=0&&X<N&&Y<N&&!vis[Y*N+X]});if(!op.length){st.pop();continue}const d=op[Math.random()*op.length|0],n=(y+d[1])*N+x+d[0];w[c]&=~d[2];w[n]&=~d[3];vis[n]=1;st.push(n)}
+const nb=i=>D.filter(d=>!(w[i]&d[2])).map(d=>i+d[1]*N+d[0]);
+const bfs=(a,t)=>{const pr={[a]:-1},q=[a];while(q.length){const c=q.shift();if(c==t)break;nb(c).forEach(n=>{if(!(n in pr)){pr[n]=c;q.push(n)}})}const p=[];for(let c=t;c!=-1;c=pr[c])p.unshift(c);return p};
+let p=0,gh=N-1,over=0;const E=N*N-1,cx=i=>i%N*S+S/2,cy=i=>(i/N|0)*S+S/2;
+const chk=()=>{if(p==gh)over=1;else if(p==E)over=2};
+o.draw=()=>{ctx.fillStyle='#000';ctx.fillRect(0,0,N*S,N*S);ctx.fillStyle='rgba(57,255,136,.5)';ctx.fillRect(E%N*S,(E/N|0)*S,S,S);
+if(on()&&!over){bfs(gh,p).forEach(i=>{ctx.fillStyle='rgba(255,43,214,.3)';ctx.fillRect(i%N*S+3,(i/N|0)*S+3,S-6,S-6)})}
+ctx.strokeStyle='#00F0FF';ctx.lineWidth=2;ctx.beginPath();w.forEach((v,i)=>{const x=i%N*S,y=(i/N|0)*S;if(v&1){ctx.moveTo(x,y);ctx.lineTo(x+S,y)}if(v&2){ctx.moveTo(x+S,y);ctx.lineTo(x+S,y+S)}if(v&4){ctx.moveTo(x,y+S);ctx.lineTo(x+S,y+S)}if(v&8){ctx.moveTo(x,y);ctx.lineTo(x,y+S)}});ctx.stroke();
+ctx.fillStyle='#FF2BD6';ctx.beginPath();ctx.arc(cx(gh),cy(gh),9,0,7);ctx.fill();ctx.fillStyle='#FFB000';ctx.beginPath();ctx.arc(cx(p),cy(p),7,0,7);ctx.fill();
+say(over==1?'잡혔습니다...':over==2?'탈출 성공! 🎉':'초록 칸으로 탈출! 방향키'+(on()?' · 마젠타 = 유령의 추격 경로':''))};
+o.key=k=>{const m={ArrowUp:0,ArrowRight:1,ArrowDown:2,ArrowLeft:3}[k];if(m===undefined||over||(w[p]&D[m][2]))return;p+=D[m][1]*N+D[m][0];chk();o.draw()};
+tm=setInterval(()=>{if(over)return;const q=bfs(gh,p);if(q.length>1)gh=q[1];chk();o.draw()},450);o.draw();return o};
+document.querySelectorAll('.aiT').forEach(b=>b.onclick=()=>{ai=!ai;upd();cur&&cur.draw&&cur.draw()});upd();
+</script></body></html>
